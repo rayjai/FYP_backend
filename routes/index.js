@@ -198,6 +198,7 @@ router.get('/api/events', async function (req, res) {
     let result = await db
       .collection("events")
       .find()
+      .sort({ createdAt: -1 }) 
       .skip(skip)
       .limit(perPage)
       .toArray();
@@ -214,6 +215,75 @@ router.get('/api/events', async function (req, res) {
   } catch (err) {
     console.error('Error fetching events:', err);
     res.status(500).json({ message: 'Internal server error' });
+  } finally {
+    await db.client.close();
+  }
+});
+
+router.get('/api/homeevent', async function (req, res) {
+  const db = await connectToDB();
+  try {
+    // Fetch the newest three events, sorted by created_at in descending order
+    let result = await db
+      .collection("events")
+      .find()
+      .sort({ createdAt: -1 }) // Sort by created_at in descending order
+      .limit(3) // Limit to the newest three events
+      .toArray();
+
+    res.status(200).json({
+      events: result
+    });
+  } catch (err) {
+    console.error('Error fetching home events:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  } finally {
+    await db.client.close();
+  }
+});
+router.get('/api/upcomingevents', async function (req, res) {
+  const db = await connectToDB();
+  try {
+    const currentDate = new Date(); // Get the current date and time
+    const formattedCurrentDate = currentDate.toISOString().split('T')[0];
+
+    // Fetch upcoming events where the event date is greater than the current date
+    let result = await db
+      .collection("events")
+      .find({ eventDateFrom: { $gt: formattedCurrentDate } })
+      .sort({ eventDateFrom: 1 }) // Sort by eventDate in ascending order
+      .toArray();
+
+    res.status(200).json({
+      upcomingEvents: result
+    });
+  } catch (err) {
+    console.error('Error fetching upcoming events:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  } finally {
+    await db.client.close();
+  }
+});
+
+router.post('/api/eventregister', async (req, res) => {
+  const db = await connectToDB();
+  try {
+    const student_id = req.body.student_id;
+    const selectedSession = req.body.selectedSession;
+    const event_id = req.body.event_id;
+  
+    
+    let registrationData = {
+      student_id: student_id,
+      selectedSession: selectedSession,
+      event_id: event_id,
+      createdAt: new Date(),
+      modifiedAt: new Date(),
+    };
+    let result = await db.collection("studentregisterevents").insertOne(registrationData);    res.status(201).json({ id: result.insertedId });
+    console.log(result);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
   } finally {
     await db.client.close();
   }
