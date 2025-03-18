@@ -4,6 +4,7 @@ const multer = require('multer');
 const path = require('path');
 
 
+
 const storage = multer.diskStorage({
   destination: (req, file, cb) => {
     cb(null, 'uploads/');
@@ -60,6 +61,7 @@ router.post('/api/register', async (req, res) => {
       modifiedAt: new Date(),
       role: role,
       icon: icon,
+      access: true,
     };
     let result = await db.collection("users").insertOne(userdata);
     res.status(201).json({ id: result.insertedId });
@@ -160,6 +162,30 @@ router.post('/api/eventnew', upload.single('eventPoster'), async (req, res) => {
     res.status(400).json({ message: err.message });
   } finally {
     await db.client.close();
+  }
+});
+
+router.delete('/api/event/:id', async (req, res) => {
+  const db = await connectToDB();
+  const recordId = req.params.id; // Get the record ID from the URL parameters
+
+  try {
+      // Convert recordId to ObjectId
+      const existingRecord = await db.collection("events").findOne({ _id: new ObjectId(recordId) });
+      if (!existingRecord) {
+          return res.status(404).json({ message: 'Record not found' });
+      }
+      console.log('Deleting Record ID:', recordId);
+
+      // Delete the record from the database
+      await db.collection("events").deleteOne({ _id: new ObjectId(recordId) });
+
+      res.status(200).json({ message: 'Record deleted successfully' });
+  } catch (err) {
+      console.error('Error deleting record:', err);
+      res.status(400).json({ message: err.message });
+  } finally {
+      await db.client.close();
   }
 });
 
@@ -548,7 +574,7 @@ router.get('/api/members', async function (req, res) {
     let result = await db
       .collection("users")
       .find({ role: 'student' }) // Filter for users with role 'student'
-      .project({ english_name: 1, student_id: 1, _id: 0 })
+      .project({ english_name: 1, student_id: 1,email:1,gender:1, _id: 1 })
       .sort({ createdAt: -1 }) // Sort by createdAt in descending order
       .toArray();
 
@@ -1027,7 +1053,8 @@ router.post('/api/income', async (req, res) => {
   try {
     const { 
       title,
-      date, 
+      date,
+      category,
       personInCharge, 
       feeItems, 
       remarks, 
@@ -1041,6 +1068,7 @@ router.post('/api/income', async (req, res) => {
     const incomeRecord = {
       title,
       date: new Date(date), // Ensure date is in the correct format
+      category,
       personInCharge,
       feeItems,
       remarks,
@@ -1068,6 +1096,7 @@ router.post('/api/expenditure', async (req, res) => {
     const { 
       title,
       date, 
+      category,
       personInCharge, 
       feeItems, 
       remarks,
@@ -1078,6 +1107,7 @@ router.post('/api/expenditure', async (req, res) => {
     const expenditureRecord = {
       title,
       date: new Date(date), // Ensure date is in the correct format
+      category,
       personInCharge,
       feeItems,
       remarks,
@@ -1168,6 +1198,7 @@ router.put('/api/income/detail/:id', async (req, res) => {
       // Get the other form data
       const title = req.body.title || existingRecord.title;
       const date = req.body.date || existingRecord.date;
+      const category = req.body.category || existingRecord.category;
       const personInCharge = req.body.personInCharge || existingRecord.personInCharge;
       const feeItems = req.body.feeItems || existingRecord.feeItems;
       const remarks = req.body.remarks || existingRecord.remarks;
@@ -1180,7 +1211,8 @@ router.put('/api/income/detail/:id', async (req, res) => {
       // Prepare the updated record data
       const updatedRecordData = {
           title,
-          date,
+          date: new Date(date),
+          category,
           personInCharge,
           feeItems,
           remarks,
@@ -1246,6 +1278,8 @@ router.put('/api/expenditure/detail/:id', async (req, res) => {
       // Get the other form data
       const title = req.body.title || existingRecord.title;
       const date = req.body.date || existingRecord.date;
+      const category = req.body.category || existingRecord.category;
+
       const personInCharge = req.body.personInCharge || existingRecord.personInCharge;
       const feeItems = req.body.feeItems || existingRecord.feeItems;
       const remarks = req.body.remarks || existingRecord.remarks;
@@ -1255,7 +1289,8 @@ router.put('/api/expenditure/detail/:id', async (req, res) => {
       // Prepare the updated record data
       const updatedRecordData = {
           title,
-          date,
+          date: new Date(date),
+          category,
           personInCharge,
           feeItems,
           remarks,
@@ -1318,6 +1353,74 @@ router.get('/api/totalincome', async function (req, res) {
   }
 });
 
+router.get('/api/income_records', async (req, res) => {
+  const db = await connectToDB();
+
+  const { month, year } = req.query;
+
+  // Convert month and year to integers
+  const monthInt = parseInt(month, 10);
+  const yearInt = parseInt(year, 10);
+
+  // Validate month and year
+  if (isNaN(monthInt) || isNaN(yearInt) || monthInt < 1 || monthInt > 12) {
+      return res.status(400).json({ error: 'Invalid month or year' });
+  }
+
+  try {
+      // Create start and end date for the query
+      const startDate = new Date(yearInt, monthInt - 1, 1);
+      const endDate = new Date(yearInt, monthInt, 1); // Next month, first day
+
+      // Fetch income records within the specified month and year
+      const records = await db.collection('income_records').find({
+          date: {
+              $gte: startDate,
+              $lt: endDate,
+          },
+      }).toArray();
+
+      res.json(records);
+  } catch (error) {
+      console.error('Error fetching income records:', error);
+      res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
+router.get('/api/expenditure_records', async (req, res) => {
+  const db = await connectToDB();
+
+  const { month, year } = req.query;
+
+  // Convert month and year to integers
+  const monthInt = parseInt(month, 10);
+  const yearInt = parseInt(year, 10);
+
+  // Validate month and year
+  if (isNaN(monthInt) || isNaN(yearInt) || monthInt < 1 || monthInt > 12) {
+      return res.status(400).json({ error: 'Invalid month or year' });
+  }
+
+  try {
+      // Create start and end date for the query
+      const startDate = new Date(yearInt, monthInt - 1, 1);
+      const endDate = new Date(yearInt, monthInt, 1); // Next month, first day
+
+      // Fetch income records within the specified month and year
+      const records = await db.collection('expenditure_records').find({
+          date: {
+              $gte: startDate,
+              $lt: endDate,
+          },
+      }).toArray();
+
+      res.json(records);
+  } catch (error) {
+      console.error('Error fetching expenditure records:', error);
+      res.status(500).json({ error: 'Internal server error' });
+  }
+});
+
 router.get('/api/totalexpenditure', async function (req, res) {
   const db = await connectToDB();
   try {
@@ -1334,5 +1437,293 @@ router.get('/api/totalexpenditure', async function (req, res) {
       res.status(500).json({ error: 'Internal server error' });
   }
 });
+router.get('/api/member/detail/:id', async function (req, res) {
+  const db = await connectToDB();
+  try {
+    const eventId = req.params.id;
+    const eventdata = await db.collection("users").findOne({ _id: new ObjectId(eventId) });
 
+    res.status(200).json(eventdata);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  } finally {
+    await db.client.close();
+  }
+});
+router.put('/api/member/detail/:id', async (req, res) => {
+  const db = await connectToDB();
+  const recordId = req.params.id; // Get the record ID from the URL parameters
+
+  try {
+      // Convert recordId to ObjectId
+      const existingRecord = await db.collection("users").findOne({ _id: new ObjectId(recordId) });
+      if (!existingRecord) {
+          return res.status(404).json({ message: 'Record not found' });
+      }
+      console.log('Record ID:', recordId);
+      console.log('Existing Record:', existingRecord);
+
+    
+      // Get the other form data
+      const english_name = req.body.english_name || existingRecord.english_name;
+      const student_id = req.body.student_id || existingRecord.student_id;
+      const email = req.body.email || existingRecord.email;
+      const password = req.body.password || existingRecord.password;
+      const access = req.body.access || existingRecord.access;
+      const gender = req.body.gender || existingRecord.gender;
+      const modifiedAt = new Date(); // Update modifiedAt to current date
+
+      // Prepare the updated record data
+      const updatedRecordData = {
+          english_name,
+          student_id,
+          email,
+          password,
+          access,
+          gender,
+          modifiedAt,
+      };
+
+     
+
+      // Update the record in the database
+      await db.collection("users").updateOne({ _id: new ObjectId(recordId) }, { $set: updatedRecordData });
+
+      res.status(200).json({ message: 'Record updated successfully' });
+  } catch (err) {
+      console.error('Error updating record:', err);
+      res.status(400).json({ message: err.message });
+  } finally {
+      await db.client.close();
+  }
+});
+
+router.delete('/api/member/detail/:id', async (req, res) => {
+  const db = await connectToDB();
+  const recordId = req.params.id; // Get the record ID from the URL parameters
+
+  try {
+      // Convert recordId to ObjectId
+      const existingRecord = await db.collection("users").findOne({ _id: new ObjectId(recordId) });
+      if (!existingRecord) {
+          return res.status(404).json({ message: 'Record not found' });
+      }
+      console.log('Deleting Record ID:', recordId);
+
+      // Delete the record from the database
+      await db.collection("users").deleteOne({ _id: new ObjectId(recordId) });
+
+      res.status(200).json({ message: 'Record deleted successfully' });
+  } catch (err) {
+      console.error('Error deleting record:', err);
+      res.status(400).json({ message: err.message });
+  } finally {
+      await db.client.close();
+  }
+});
+
+router.get('/api/user/detail/:id', async function (req, res) {
+  const db = await connectToDB();
+  try {
+    const eventId = req.params.id;
+    const eventdata = await db.collection("users").findOne({ student_id: eventId  });
+
+    res.status(200).json(eventdata);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  } finally {
+    await db.client.close();
+  }
+});
+router.put('/api/user/detail/:id', upload.single('icon'), async (req, res) => {
+  const db = await connectToDB();
+  const recordId = req.params.id; // Get the record ID from the URL parameters
+
+  try {
+      // Convert recordId to ObjectId
+      const existingRecord = await db.collection("users").findOne({ _id: new ObjectId(recordId) });
+      if (!existingRecord) {
+          return res.status(404).json({ message: 'Record not found' });
+      }
+      console.log('Record ID:', recordId);
+      console.log('Existing Record:', existingRecord);
+
+    
+      // Get the other form data
+      const english_name = req.body.english_name || existingRecord.english_name;
+      const student_id = req.body.student_id || existingRecord.student_id;
+      const email = req.body.email || existingRecord.email;
+      const password = req.body.password || existingRecord.password;
+      const gender = req.body.gender || existingRecord.gender;
+      const modifiedAt = new Date(); // Update modifiedAt to current date
+
+      // Prepare the updated record data
+      const updatedRecordData = {
+          english_name,
+          student_id,
+          email,
+          password,
+          gender,
+          modifiedAt,
+      };
+
+      if (req.file) {
+        updatedRecordData.icon = req.file.filename; // Store the new filename in the record
+      }
+  
+
+      // Update the record in the database
+      await db.collection("users").updateOne({ _id: new ObjectId(recordId) }, { $set: updatedRecordData });
+
+      res.status(200).json({ message: 'Record updated successfully' });
+  } catch (err) {
+      console.error('Error updating record:', err);
+      res.status(400).json({ message: err.message });
+  } finally {
+      await db.client.close();
+  }
+});
+
+const Nodemailer = require("nodemailer");
+
+const transport = Nodemailer.createTransport({
+  host: "live.smtp.mailtrap.io",
+  port: 587,
+  auth: {
+    user: "api",
+    pass: "8d48cf0ac0227c84aa8377321a8b8f22"
+  }
+});
+
+// Password Reset Request Endpoint
+router.post('/api/reset-password', async (req, res) => {
+  const db = await connectToDB();
+
+  const { email } = req.body;
+
+  try {
+    const user = await db.collection("users").findOne({ email:email });
+
+      if (!user) {
+          return res.status(404).json({ message: 'Email not found.' });
+      }
+
+      // Send the reset email with user ID
+      const resetUrl = `http://localhost:5173/reset-password/${user._id}`;
+      await transport.sendMail({
+        from: {
+          name: 'Mailtrap Test',
+          address: 'hello@ray218.com',
+        },
+        to: email,
+        subject: 'Password Reset Request',
+        text: `You requested a password reset. Click the link below to reset your password:\n${resetUrl}`,
+      });
+  
+      res.status(200).json({ message: 'Reset email sent.' });
+    } catch (error) {
+      console.error('Error during password reset:', error);
+      res.status(500).json({ message: 'Internal server error.' });
+    }
+  });
+  router.post('/api/finance_category', async (req, res) => {
+    const db = await connectToDB();
+    try {
+        const { code, category, clubId } = req.body;
+
+        // Check if a record with the same code or category already exists
+        const existingRecord = await db.collection("finance_categories").findOne({
+            $or: [
+                { code: code },
+                { category: category }
+            ]
+        });
+
+        if (existingRecord) {
+            return res.status(409).json({ message: 'Finance Category with the same code or name already exists.' });
+        }
+
+        // Create the finance category object
+        const expenditureRecord = {
+            code,
+            category,
+            clubId,
+            createdAt: new Date(),
+            modifiedAt: new Date()
+        };
+
+        // Insert the record into the database
+        let result = await db.collection("finance_categories").insertOne(expenditureRecord);
+        res.status(200).json({ message: 'Finance Category added successfully', id: result.insertedId });
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    } finally {
+        await db.client.close();
+    }
+});
+
+
+  router.get('/api/finance_category', async function (req, res) {
+    const db = await connectToDB();
+    try {
+        // Perform database query to find all income records
+        const expenditureRecords = await db.collection('finance_categories').find().toArray();
+  
+        // Respond with the found income records
+        res.json(expenditureRecords);
+    } catch (error) {
+        console.error('Error fetching expenditure records:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+  });
+  router.post('/api/inventory_category', async (req, res) => {
+    const db = await connectToDB();
+    try {
+        const { code, category, clubId } = req.body;
+
+        // Check if a record with the same code or category already exists
+        const existingRecord = await db.collection("inventory_categories").findOne({
+            $or: [
+                { code: code },
+                { category: category }
+            ]
+        });
+
+        if (existingRecord) {
+            return res.status(409).json({ message: 'Inventory Category with the same code or name already exists.' });
+        }
+
+        // Create the finance category object
+        const expenditureRecord = {
+            code,
+            category,
+            clubId,
+            createdAt: new Date(),
+            modifiedAt: new Date()
+        };
+
+        // Insert the record into the database
+        let result = await db.collection("inventory_categories").insertOne(expenditureRecord);
+        res.status(200).json({ message: 'Inventory Category added successfully', id: result.insertedId });
+    } catch (err) {
+        res.status(400).json({ message: err.message });
+    } finally {
+        await db.client.close();
+    }
+});
+
+
+  router.get('/api/inventory_category', async function (req, res) {
+    const db = await connectToDB();
+    try {
+        // Perform database query to find all income records
+        const expenditureRecords = await db.collection('inventory_categories').find().toArray();
+  
+        // Respond with the found income records
+        res.json(expenditureRecords);
+    } catch (error) {
+        console.error('Error fetching inventory records:', error);
+        res.status(500).json({ error: 'Internal server error' });
+    }
+  });
 module.exports = router;
