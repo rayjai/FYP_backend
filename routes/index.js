@@ -90,6 +90,9 @@ router.post('/api/login', async (req, res) => {
     if (!user) {
       return res.status(404).send('User not found');
     }
+    if (user.access === false) {
+      return res.status(403).send('Access denied'); // Forbidden
+    }
 
     // Check if the password is correct
     if (user.password !== password) {
@@ -398,56 +401,94 @@ router.get('/api/admincheckregistrations/:id', async function (req, res) {
     await db.client.close(); // Ensure the database connection is closed
   }
 });
-router.post('/api/eventregister', async (req, res) => {
+router.post('/api/eventregister', upload.single('fpsPaymentPhoto'), async (req, res) => {
   const db = await connectToDB();
   try {
-    const student_id = req.body.student_id;
-    const selectedSession = req.body.selectedSession;
-    const multipleSection = req.body.multipleSection;
-    const eventid = req.body.event_id;
-    const attendance = req.body.attendance;
-    const eventDateFrom = req.body.eventDateFrom;
-    const eventName = req.body.eventName;
+      const student_id = req.body.student_id;
+      const selectedSession = req.body.selectedSession;
+      const multipleSection = req.body.multipleSection;
+      const event_id = req.body.event_id;
+      const attendance = req.body.attendance;
+      const eventDateFrom = req.body.eventDateFrom; // Changed to match the frontend
+      const eventName = req.body.eventName;
+      const paymentMethod = req.body.paymentMethod;
 
+      // Optional: Handle uploaded file
+      let fpsPaymentPhoto = req.file ? req.file.filename : null; // Get the filename of the uploaded photo
 
-    let registrationData = {
-      student_id: student_id,
-      selectedSession: selectedSession,
-      multipleSection: multipleSection,
-      event_id: eventid,
-      attendance: attendance,
-      eventDateFrom: eventDateFrom,
-      eventName: eventName,
-      createdAt: new Date(),
-      modifiedAt: new Date(),
-    };
-    let result = await db.collection("registerEvents").insertOne(registrationData);
-    res.status(201).json({ id: result.insertedId });
-    console.log(result);
+      let registrationData = {
+          student_id: student_id,
+          selectedSession: selectedSession,
+          multipleSection: multipleSection,
+          event_id: event_id,
+          attendance: attendance,
+          eventDateFrom: eventDateFrom,
+          eventName: eventName,
+          paymentMethod: paymentMethod,
+          fpsPaymentPhoto: fpsPaymentPhoto, // Add the photo filename to the registration data
+          confirm: false,
+          createdAt: new Date(),
+          modifiedAt: new Date(),
+      };
+
+      let result = await db.collection("registerEvents").insertOne(registrationData);
+      res.status(201).json({ id: result.insertedId });
+      console.log(result);
   } catch (err) {
-    res.status(400).json({ message: err.message });
+      res.status(400).json({ message: err.message });
   } finally {
-    await db.client.close();
+      await db.client.close();
   }
 });
+// Assuming you're using Express.js
+router.delete('/api/registrations/:student_id/:event_id', async (req, res) => {
+  const db = await connectToDB();
+  const { student_id, event_id } = req.params;
+
+  try {
+      // Find and delete the registration document
+      const result = await db.collection("registerEvents").deleteOne({
+          student_id: student_id,
+          event_id: event_id
+      });
+
+      if (result.deletedCount === 0) {
+          return res.status(404).json({ message: 'Registration not found' });
+      }
+
+      res.status(200).json({ message: 'Registration deleted successfully' });
+  } catch (err) {
+      console.error('Error deleting registration:', err);
+      res.status(500).json({ message: 'Internal Server Error' });
+  } finally {
+      await db.client.close();
+  }
+});
+
 
 router.post('/api/createclub', upload.fields([
   { name: 'poster1' },
   { name: 'poster2' },
-  { name: 'poster3' }
+  { name: 'poster3' },
+  { name: 'webIcon' },
+  { name: 'backgroundImage' },
+  { name: 'logoImage' },
+  { name: 'aboutImage' }
 ]), async (req, res) => {
   const db = await connectToDB();
   try {
     // Get the file data
     const files = req.files;
     console.log(req.files);
+
     // Get the other form data
     const clubName = req.body.clubName;
     const description = req.body.description;
     const philosophy = req.body.philosophy;
     const logomeaning = req.body.logomeaning;
+    const fpsPaymentNumber = req.body.fpsPaymentNumber;
 
-    // Create a new event
+    // Create a new club data object
     let clubdata = {
       clubName: clubName,
       description: description,
@@ -456,25 +497,25 @@ router.post('/api/createclub', upload.fields([
       eventPoster1: files.poster1 ? files.poster1[0].filename : null,
       eventPoster2: files.poster2 ? files.poster2[0].filename : null,
       eventPoster3: files.poster3 ? files.poster3[0].filename : null,
-      filePath1: files.poster1 ? files.poster1[0].path : null,
-      filePath2: files.poster2 ? files.poster2[0].path : null,
-      filePath3: files.poster3 ? files.poster3[0].path : null,
-      fileType1: files.poster1 ? files.poster1[0].mimetype : null,
-      fileType2: files.poster2 ? files.poster2[0].mimetype : null,
-      fileType3: files.poster3 ? files.poster3[0].mimetype : null,
+      webIcon: files.webIcon ? files.webIcon[0].filename : null,
+      backgroundImage: files.backgroundImage ? files.backgroundImage[0].filename : null,
+      logoImage: files.logoImage ? files.logoImage[0].filename : null,
+      aboutImage: files.aboutImage ? files.aboutImage[0].filename : null,
+      fpsPaymentNumber: fpsPaymentNumber,
       createdAt: new Date(),
       modifiedAt: new Date(),
     };
 
-    // Insert the event data into the database
+    // Insert the club data into the database
     let result = await db.collection("clubs").insertOne(clubdata);
-    res.status(201).json({ message: 'Event created successfully' });
+    res.status(201).json({ message: 'Club created successfully' });
   } catch (err) {
     res.status(400).json({ message: err.message });
   } finally {
     await db.client.close();
   }
 });
+
 
 router.get('/api/homecontent/:id', async function (req, res) {
   const db = await connectToDB();
@@ -517,7 +558,7 @@ router.get('/api/club/detail/:id', async function (req, res) {
   }
 });
 
-router.put('/api/editclub/:id', upload.fields([{ name: 'eventPoster1' }, { name: 'eventPoster2' }, { name: 'eventPoster3' }]), async (req, res) => {
+router.put('/api/editclubhome/:id', upload.fields([{ name: 'eventPoster1' }, { name: 'eventPoster2' }, { name: 'eventPoster3' }]), async (req, res) => {
   const db = await connectToDB();
   const clubId = req.params.id; // Get the club ID from the URL parameters
 
@@ -566,6 +607,99 @@ router.put('/api/editclub/:id', upload.fields([{ name: 'eventPoster1' }, { name:
       await db.client.close();
   }
 });
+
+
+// Define the route for editing the About Us page
+router.put('/api/editaboutus/:id', upload.fields([{ name: 'aboutImage' }, { name: 'logoImage' }]), async (req, res) => {
+    const db = await connectToDB();
+    const clubId = req.params.id; // Get the club ID from the URL parameters
+
+    try {
+        // Convert clubId to ObjectId
+        const existingClub = await db.collection("clubs").findOne({ _id: new ObjectId(clubId) });
+        if (!existingClub) {
+            return res.status(404).json({ message: 'Club not found' });
+        }
+
+        // Get the file data if new files were uploaded
+        const files = req.files;
+
+        // Get the other form data
+        const philosophy = req.body.philosophy || existingClub.philosophy;
+        const logoMeaning = req.body.logomeaning || existingClub.logoMeaning;
+
+        // Prepare the updated club data
+        const updatedClubData = {
+            philosophy,
+            logoMeaning,
+            modifiedAt: new Date(),
+        };
+
+        // If new files were uploaded, update the corresponding fields
+        if (files) {
+            if (files.aboutImage) {
+                updatedClubData.aboutImage = files.aboutImage[0].filename; // Update with new filename
+            }
+            if (files.logoImage) {
+                updatedClubData.logoImage = files.logoImage[0].filename; // Update with new filename
+            }
+        }
+
+        // Update the club in the database
+        await db.collection("clubs").updateOne({ _id: new ObjectId(clubId) }, { $set: updatedClubData });
+
+        res.status(200).json({ message: 'About Us page updated successfully' });
+    } catch (err) {
+        console.error('Error updating About Us page:', err);
+        res.status(400).json({ message: err.message });
+    } finally {
+        await db.client.close();
+    }
+});
+router.put('/api/editicon/:id', upload.fields([{ name: 'webIcon' }, { name: 'backgroundImage' }]), async (req, res) => {
+  const db = await connectToDB();
+  const clubId = req.params.id; // Get the club ID from the URL parameters
+
+  try {
+      // Convert clubId to ObjectId
+      const existingClub = await db.collection("clubs").findOne({ _id: new ObjectId(clubId) });
+      if (!existingClub) {
+          return res.status(404).json({ message: 'Club not found' });
+      }
+
+      // Get the file data if new files were uploaded
+      const files = req.files;
+
+    
+      // Prepare the updated club data
+      const updatedClubData = {
+          modifiedAt: new Date(),
+      };
+
+      // If new files were uploaded, update the corresponding fields
+      if (files) {
+          if (files.webIcon) {
+              updatedClubData.webIcon = files.webIcon[0].filename; // Update with new filename
+          }
+          if (files.backgroundImage) {
+              updatedClubData.backgroundImage = files.backgroundImage[0].filename; // Update with new filename
+          }
+      }
+      if (req.body.fpsPaymentNumber) {
+        updatedClubData.fpsPaymentNumber = req.body.fpsPaymentNumber; // Add FPS payment number to the update
+    }
+      // Update the club in the database
+      await db.collection("clubs").updateOne({ _id: new ObjectId(clubId) }, { $set: updatedClubData });
+
+      res.status(200).json({ message: 'updated successfully' });
+  } catch (err) {
+      console.error('Error updating page:', err);
+      res.status(400).json({ message: err.message });
+  } finally {
+      await db.client.close();
+  }
+});
+
 
 router.get('/api/members', async function (req, res) {
   const db = await connectToDB();
@@ -1469,7 +1603,7 @@ router.put('/api/member/detail/:id', async (req, res) => {
       const student_id = req.body.student_id || existingRecord.student_id;
       const email = req.body.email || existingRecord.email;
       const password = req.body.password || existingRecord.password;
-      const access = req.body.access || existingRecord.access;
+      const access = req.body.access
       const gender = req.body.gender || existingRecord.gender;
       const modifiedAt = new Date(); // Update modifiedAt to current date
 
@@ -1584,16 +1718,23 @@ router.put('/api/user/detail/:id', upload.single('icon'), async (req, res) => {
   }
 });
 
+
 const Nodemailer = require("nodemailer");
 
 const transport = Nodemailer.createTransport({
-  host: "live.smtp.mailtrap.io",
-  port: 587,
+  pool: false,
+  host: "mh5.comp.hkbu.edu.hk",
+  port: 465,
+  secure: true, // use TLS
   auth: {
-    user: "api",
-    pass: "8d48cf0ac0227c84aa8377321a8b8f22"
+    user: "f1233411",
+    pass: "Aa230915098"
+  },
+  tls: {
+    rejectUnauthorized: false // This will ignore certificate errors
   }
 });
+
 
 // Password Reset Request Endpoint
 router.post('/api/reset-password', async (req, res) => {
@@ -1612,8 +1753,8 @@ router.post('/api/reset-password', async (req, res) => {
       const resetUrl = `http://localhost:5173/reset-password/${user._id}`;
       await transport.sendMail({
         from: {
-          name: 'Mailtrap Test',
-          address: 'hello@ray218.com',
+          name: 'f1233411',
+          address: 'f1233411@comp.hkbu.edu.hk',
         },
         to: email,
         subject: 'Password Reset Request',
@@ -1726,4 +1867,69 @@ router.post('/api/reset-password', async (req, res) => {
         res.status(500).json({ error: 'Internal server error' });
     }
   });
+
+
+const Stripe = require('stripe');
+
+// Initialize Stripe with your secret API key
+const stripe = Stripe('sk_test_51QaEexBLfCf3x01sxcKOtGvx4BFnNPgCLfQiUgALOadNDi4Q0tG5hD5j8798QHQWDsoNUy8V11Fz6HKv7AUigHlD009vKXsi09');
+
+// Your domain, adjust as necessary
+const YOUR_DOMAIN = 'http://localhost:5173';
+
+
+
+router.post('/api/create-checkout-session', async (req, res) => {
+  console.log('Received request body:', req.body); // Log the incoming request data
+
+  const { eventName, eventPrice, registrationData, uniqueKey } = req.body;
+
+  // Check if the required fields are present
+  if (!eventName || !eventPrice || !registrationData) {
+      return res.status(400).json({ error: 'Missing eventName, eventPrice, or registrationData' });
+  }
+
+  // Extract registration data fields
+  const {
+      student_id,
+      selectedSession,
+      multipleSection,
+      event_id,
+      attendance,
+      eventDateFrom,
+  } = registrationData;
+
+  // Log registration data for debugging
+  console.log('Registration Data:', registrationData);
+
+  try {
+      const session = await stripe.checkout.sessions.create({
+          line_items: [
+              {
+                  price_data: {
+                      currency: 'hkd',
+                      product_data: {
+                          name: eventName,
+                      },
+                      unit_amount: eventPrice,
+                  },
+                  quantity: 1,
+              },
+          ],
+          mode: 'payment',
+          success_url: `${YOUR_DOMAIN}/success?student_id=${student_id}&event_id=${event_id}&selectedSession=${selectedSession}&multipleSection=${multipleSection}&attendance=${attendance}&eventDateFrom=${eventDateFrom}&eventName=${eventName}&uniqueKey=${uniqueKey}`,
+          cancel_url: `${YOUR_DOMAIN}/cancel`,
+          automatic_tax: { enabled: true },
+      });
+
+      res.json({ url: session.url }); // Return the session URL
+  } catch (error) {
+      console.error('Error creating checkout session:', error);
+      res.status(500).json({ error: 'Internal Server Error' });
+  }
+});
+
+
+
+
 module.exports = router;
