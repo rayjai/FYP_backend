@@ -114,60 +114,73 @@ router.post('/api/login', async (req, res) => {
 
 
 
-
-
 router.post('/api/eventnew', upload.single('eventPoster'), async (req, res) => {
   const db = await connectToDB();
   try {
-    // Get the file data
-    const file = req.file;
+      // Get the file data
+      const file = req.file;
 
-    // Get the other form data
-    const eventName = req.body.eventName;
-    const eventDescription = req.body.eventDescription;
-    const eventDateFrom = req.body.eventDateFrom;
-    const eventDateTo = req.body.eventDateTo;
-    const eventTimeStart = req.body.eventTimeStart;
-    const eventTimeEnd = req.body.eventTimeEnd;
-    const eventType = req.body.eventType;
-    const eventPrice = req.body.eventPrice;
-    const eventVenue = req.body.eventVenue;
-    const multipleSection = req.body.multipleSection;
-    const sectionNumber = req.body.sectionNumber;
-    const fileExtension = path.extname(file.originalname);
-    const newFilename = `${file.originalname}${fileExtension}`;
+      // Get the other form data
+      const {
+          eventName,
+          eventDescription,
+          eventDateFrom,
+          eventDateTo,
+          eventTimeStart,
+          eventTimeEnd,
+          eventType,
+          eventPrice,
+          eventVenue,
+          multipleSection,
+          totalmaxRegistration,
+          sectionNumber,
+          sections // This is now the JSON string
+      } = req.body;
 
-    // Create a new event
-    let eventdata = {
-      eventName: eventName,
-      eventDateFrom: eventDateFrom,
-      eventDateTo: eventDateTo,
-      eventTimeStart: eventTimeStart,
-      eventTimeEnd: eventTimeEnd,
-      eventType: eventType,
-      eventPrice: eventPrice,
-      eventDescription: eventDescription,
-      eventVenue: eventVenue,
-      sectionNumber: sectionNumber,
-      multipleSection: multipleSection,
-      eventPoster: file.filename,
-      filePath: file.path,
-      fileType: file.mimetype,
-      createdAt: new Date(),
-      modifiedAt: new Date(),
+      // Parse the sections if they exist
+      let parsedSections = [];
+      if (multipleSection === 'yes' && sections) {
+          try {
+              parsedSections = JSON.parse(sections);
+          } catch (e) {
+              console.error('Error parsing sections:', e);
+              return res.status(400).json({ message: 'Invalid sections data' });
+          }
+      }
 
-    };
+      // Create a new event
+      const eventdata = {
+          eventName,
+          eventDateFrom,
+          eventDateTo,
+          eventTimeStart,
+          eventTimeEnd,
+          eventType,
+          eventPrice,
+          eventDescription,
+          eventVenue,
+          sectionNumber,
+          multipleSection,
+          totalmaxRegistration,
+          eventPoster: file.filename,
+          filePath: file.path,
+          fileType: file.mimetype,
+          createdAt: new Date(),
+          modifiedAt: new Date(),
+          sections: parsedSections,
+          canRegister: true
+      };
 
-    // Insert the event data into the database
-    let result = await db.collection("events").insertOne(eventdata);
-    res.status(201).json({ message: 'Event created successfully' });
+      // Insert the event data into the database
+      const result = await db.collection("events").insertOne(eventdata);
+      res.status(201).json({ message: 'Event created successfully' });
   } catch (err) {
-    res.status(400).json({ message: err.message });
+      console.error('Error:', err);
+      res.status(400).json({ message: err.message });
   } finally {
-    await db.client.close();
+      await db.client.close();
   }
 });
-
 router.delete('/api/event/:id', async (req, res) => {
   const db = await connectToDB();
   const recordId = req.params.id; // Get the record ID from the URL parameters
@@ -217,32 +230,49 @@ router.get('/api/event/detail/:id', async function (req, res) {
 
 router.put('/api/event/:id', upload.single('eventPoster'), async (req, res) => {
   const db = await connectToDB();
-  const eventId = req.params.id; // Get the event ID from the URL parameters
+  const eventId = req.params.id;
 
   try {
       // Convert eventId to ObjectId
-      const existingEvent = await db.collection("events").findOne({ _id: new ObjectId(eventId) }); // Use 'new' here
+      const existingEvent = await db.collection("events").findOne({ _id: new ObjectId(eventId) });
       if (!existingEvent) {
           return res.status(404).json({ message: 'Event not found' });
       }
-      console.log('Event ID:', eventId);
-      console.log('Existing Event:', existingEvent);
-      
+
+      // Debug logs
+      console.log('Full request body:', req.body);
+      console.log('All keys in request body:', Object.keys(req.body));
+
       // Get the file data if a new file was uploaded
       const file = req.file;
 
-      // Get the other form data
-      const eventName = req.body.eventName || existingEvent.eventName;
-      const eventDescription = req.body.eventDescription || existingEvent.eventDescription;
-      const eventDateFrom = req.body.eventDateFrom || existingEvent.eventDateFrom;
-      const eventDateTo = req.body.eventDateTo || existingEvent.eventDateTo;
-      const eventTimeStart = req.body.eventTimeStart || existingEvent.eventTimeStart;
-      const eventTimeEnd = req.body.eventTimeEnd || existingEvent.eventTimeEnd;
-      const eventType = req.body.eventType || existingEvent.eventType;
-      const eventPrice = req.body.eventPrice || existingEvent.eventPrice;
-      const eventVenue = req.body.eventVenue || existingEvent.eventVenue;
-      const multipleSection = req.body.multipleSection || existingEvent.multipleSection;
-      const sectionNumber = req.body.sectionNumber || existingEvent.sectionNumber;
+      // Get the other form data with fallback to existing values
+      const {
+          eventName = existingEvent.eventName,
+          eventDescription = existingEvent.eventDescription,
+          eventDateFrom = existingEvent.eventDateFrom,
+          eventDateTo = existingEvent.eventDateTo,
+          eventTimeStart = existingEvent.eventTimeStart,
+          eventTimeEnd = existingEvent.eventTimeEnd,
+          eventType = existingEvent.eventType,
+          eventPrice = existingEvent.eventPrice,
+          eventVenue = existingEvent.eventVenue,
+          multipleSection = existingEvent.multipleSection,
+          totalmaxRegistration = existingEvent.totalmaxRegistration,
+          sectionNumber = existingEvent.sectionNumber,
+          sections = JSON.stringify(existingEvent.sections) // Default to existing sections as JSON string
+      } = req.body;
+
+      // Parse sections if they exist
+      let parsedSections = existingEvent.sections; // Default to existing sections
+      if (multipleSection === 'yes' && req.body.sections) {
+          try {
+              parsedSections = JSON.parse(sections);
+          } catch (e) {
+              console.error('Error parsing sections:', e);
+              return res.status(400).json({ message: 'Invalid sections data' });
+          }
+      }
 
       // Prepare the updated event data
       const updatedEventData = {
@@ -252,28 +282,40 @@ router.put('/api/event/:id', upload.single('eventPoster'), async (req, res) => {
           eventTimeStart,
           eventTimeEnd,
           eventType,
-          eventPrice,
+          eventPrice: eventType === 'charged' ? parseFloat(eventPrice) : 0,
           eventDescription,
           eventVenue,
           sectionNumber,
           multipleSection,
-          modifiedAt: new Date(),
+          totalmaxRegistration: parseInt(totalmaxRegistration),
+          sections: parsedSections,
+          modifiedAt: new Date()
       };
 
-      // If a new file was uploaded, update the eventPoster field
+      // If a new file was uploaded, update the file-related fields
       if (file) {
-          updatedEventData.eventPoster = file.filename; // Update with new filename
-          updatedEventData.filePath = file.path; // Update with new file path
-          updatedEventData.fileType = file.mimetype; // Update with new file type
+          updatedEventData.eventPoster = file.filename;
+          updatedEventData.filePath = file.path;
+          updatedEventData.fileType = file.mimetype;
       }
 
+      // Debug log before update
+      console.log('Data to be updated:', updatedEventData);
+
       // Update the event in the database
-      await db.collection("events").updateOne({ _id: new ObjectId(eventId) }, { $set: updatedEventData }); // Use 'new' here
+      const result = await db.collection("events").updateOne(
+          { _id: new ObjectId(eventId) },
+          { $set: updatedEventData }
+      );
+
+      if (result.modifiedCount === 0) {
+          return res.status(404).json({ message: 'No changes detected or event not found' });
+      }
 
       res.status(200).json({ message: 'Event updated successfully' });
   } catch (err) {
       console.error('Error updating event:', err);
-      res.status(400).json({ message: err.message });
+      res.status(500).json({ message: 'Internal server error' });
   } finally {
       await db.client.close();
   }
@@ -401,41 +443,108 @@ router.get('/api/admincheckregistrations/:id', async function (req, res) {
     await db.client.close(); // Ensure the database connection is closed
   }
 });
+router.get('/api/admincheckregistrations/:id/count', async function (req, res) {
+  const event_id = req.params.id;
+
+  if (!event_id) {
+      return res.status(400).json({ message: 'Event ID is required' });
+  }
+
+  const db = await connectToDB();
+
+  try {
+      const totalCount = await db.collection("registerEvents")
+          .countDocuments({ event_id });
+
+      res.status(200).json({ totalRegistrations: totalCount });
+
+  } catch (error) {
+      console.error('Error counting registrations:', error);
+      res.status(500).json({ 
+          message: 'Internal server error',
+          error: process.env.NODE_ENV === 'development' ? error.message : undefined
+      });
+  } finally {
+      await db.client.close();
+  }
+});
+router.patch('/api/event/:id/canRegister', async (req, res) => {
+  const db = await connectToDB();
+  const eventId = req.params.id;
+  const { canRegister } = req.body;
+
+  try {
+      await db.collection("events").updateOne(
+          { _id: new ObjectId(eventId) },
+          { $set: { canRegister } }
+      );
+      res.status(200).json({ message: 'Registration status updated successfully' });
+  } catch (err) {
+      res.status(400).json({ message: err.message });
+  } finally {
+      await db.client.close();
+  }
+});
+
 router.post('/api/eventregister', upload.single('fpsPaymentPhoto'), async (req, res) => {
   const db = await connectToDB();
   try {
+      // Basic registration data
       const student_id = req.body.student_id;
-      const selectedSession = req.body.selectedSession;
-      const multipleSection = req.body.multipleSection;
       const event_id = req.body.event_id;
       const attendance = req.body.attendance;
-      const eventDateFrom = req.body.eventDateFrom; // Changed to match the frontend
+      const eventDateFrom = req.body.eventDateFrom;
       const eventName = req.body.eventName;
       const paymentMethod = req.body.paymentMethod;
+      
+      // Section-related data
+      const selectedSection = req.body.selectedSection || null;
+      const sectionName = req.body.sectionName || null;
+      const sectionMaxRegistration = req.body.sectionMaxRegistration || null;
+      
+      // Handle uploaded file
+      let fpsPaymentPhoto = req.file ? req.file.filename : null;
 
-      // Optional: Handle uploaded file
-      let fpsPaymentPhoto = req.file ? req.file.filename : null; // Get the filename of the uploaded photo
-
+      // Build registration data
       let registrationData = {
           student_id: student_id,
-          selectedSession: selectedSession,
-          multipleSection: multipleSection,
           event_id: event_id,
-          attendance: attendance,
+          attendance: false,
           eventDateFrom: eventDateFrom,
           eventName: eventName,
           paymentMethod: paymentMethod,
-          fpsPaymentPhoto: fpsPaymentPhoto, // Add the photo filename to the registration data
+          fpsPaymentPhoto: fpsPaymentPhoto,
           confirm: false,
           createdAt: new Date(),
           modifiedAt: new Date(),
+          // Section data
+          sectionData: {
+              selectedSection: selectedSection,
+              sectionName: sectionName,
+              maxRegistration: sectionMaxRegistration ? parseInt(sectionMaxRegistration) : null
+          }
       };
 
+      // Only include multipleSection if it exists in the request
+      if (req.body.multipleSection) {
+          registrationData.multipleSection = req.body.multipleSection;
+      }
+
+      // Insert registration
       let result = await db.collection("registerEvents").insertOne(registrationData);
-      res.status(201).json({ id: result.insertedId });
-      console.log(result);
+      
+
+      res.status(201).json({ 
+          id: result.insertedId,
+          message: 'Registration successful'
+      });
+      
   } catch (err) {
-      res.status(400).json({ message: err.message });
+      console.error('Error in registration:', err);
+      res.status(400).json({ 
+          message: 'Registration failed',
+          error: err.message 
+      });
   } finally {
       await db.client.close();
   }
@@ -485,7 +594,7 @@ router.post('/api/createclub', upload.fields([
     const clubName = req.body.clubName;
     const description = req.body.description;
     const philosophy = req.body.philosophy;
-    const logomeaning = req.body.logomeaning;
+    const logoMeaning = req.body.logoMeaning;
     const fpsPaymentNumber = req.body.fpsPaymentNumber;
 
     // Create a new club data object
@@ -493,7 +602,7 @@ router.post('/api/createclub', upload.fields([
       clubName: clubName,
       description: description,
       philosophy: philosophy,
-      logomeaning: logomeaning,
+      logoMeaning: logoMeaning,
       eventPoster1: files.poster1 ? files.poster1[0].filename : null,
       eventPoster2: files.poster2 ? files.poster2[0].filename : null,
       eventPoster3: files.poster3 ? files.poster3[0].filename : null,
@@ -626,7 +735,7 @@ router.put('/api/editaboutus/:id', upload.fields([{ name: 'aboutImage' }, { name
 
         // Get the other form data
         const philosophy = req.body.philosophy || existingClub.philosophy;
-        const logoMeaning = req.body.logomeaning || existingClub.logoMeaning;
+        const logoMeaning = req.body.logoMeaning || existingClub.logoMeaning;
 
         // Prepare the updated club data
         const updatedClubData = {
@@ -750,7 +859,7 @@ router.put('/api/attendance/:eventId/:studentId', async (req, res) => {
       // Update the attendance status for the student in the context of the event
       const result = await db.collection('registerEvents').updateOne(
           { event_id: eventId, student_id: studentId }, // Filter by event_id and student_id
-          { $set: { attendance: attendance } } // Update the attendance field
+          { $set: { attendance: true } } // Update the attendance field
       );
 
       if (result.modifiedCount === 1) {
@@ -1929,6 +2038,46 @@ router.post('/api/create-checkout-session', async (req, res) => {
   }
 });
 
+router.post('/api/notifications', async (req, res) => {
+  const db = await connectToDB();
+  try {
+    const { title, message } = req.body;
+
+    // Create the notification object
+    const notification = {
+      title,
+      message,
+      createdAt: new Date(),
+      modifiedAt: new Date()
+    };
+
+    // Insert the notification into the database
+    let result = await db.collection("notifications").insertOne(notification);
+    res.status(201).json({ message: 'Notification saved successfully', id: result.insertedId });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  } finally {
+    await db.client.close();
+  }
+});
+router.get('/api/notifications', async (req, res) => {
+  const db = await connectToDB();
+  try {
+    // Fetch notifications from the database, sorted by createdAt in descending order
+    const notifications = await db.collection("notifications")
+      .find({})
+      .sort({ createdAt: -1 }) // Sort by createdAt in descending order
+      .limit(8) 
+      .toArray();
+
+    // Send the notifications as a response
+    res.status(200).json(notifications);
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  } finally {
+    await db.client.close();
+  }
+});
 
 
 
