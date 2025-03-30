@@ -2,7 +2,12 @@ var express = require('express');
 var router = express.Router();
 const multer = require('multer');
 const path = require('path');
+const cors = require('cors');
+const axios = require('axios');
+const fs = require('fs'); // Add this line
+const QRCode = require('qrcode');
 
+router.use(cors());
 
 
 const storage = multer.diskStorage({
@@ -35,12 +40,13 @@ router.post('/api/register', async (req, res) => {
     const student_id = req.body.student_id;
     const email = req.body.email;
     const password = req.body.password;
+    const phoneNo = req.body.phoneNo;
     const gender = req.body.gender;
     const role = req.body.role;
     const icon = req.body.icon;
 
     // Check if the registration data is valid
-    if (!english_name || !student_id || !email || !password || !gender) {
+    if (!english_name || !student_id || !email || !password || !gender || !phoneNo) {
       return res.status(400).send('Bad Request');
     }
 
@@ -56,6 +62,7 @@ router.post('/api/register', async (req, res) => {
       student_id: student_id,
       email: email,
       password: password,
+      phoneNo: phoneNo,
       gender: gender,
       createdAt: new Date(),
       modifiedAt: new Date(),
@@ -131,6 +138,7 @@ router.post('/api/eventnew', upload.single('eventPoster'), async (req, res) => {
           eventType,
           eventPrice,
           eventVenue,
+          deadline,
           multipleSection,
           totalmaxRegistration,
           sectionNumber,
@@ -159,6 +167,7 @@ router.post('/api/eventnew', upload.single('eventPoster'), async (req, res) => {
           eventPrice,
           eventDescription,
           eventVenue,
+          deadline,
           sectionNumber,
           multipleSection,
           totalmaxRegistration,
@@ -257,6 +266,7 @@ router.put('/api/event/:id', upload.single('eventPoster'), async (req, res) => {
           eventType = existingEvent.eventType,
           eventPrice = existingEvent.eventPrice,
           eventVenue = existingEvent.eventVenue,
+          deadline = existingEvent.deadline,
           multipleSection = existingEvent.multipleSection,
           totalmaxRegistration = existingEvent.totalmaxRegistration,
           sectionNumber = existingEvent.sectionNumber,
@@ -285,6 +295,7 @@ router.put('/api/event/:id', upload.single('eventPoster'), async (req, res) => {
           eventPrice: eventType === 'charged' ? parseFloat(eventPrice) : 0,
           eventDescription,
           eventVenue,
+          deadline,
           sectionNumber,
           multipleSection,
           totalmaxRegistration: parseInt(totalmaxRegistration),
@@ -533,12 +544,70 @@ router.post('/api/eventregister', upload.single('fpsPaymentPhoto'), async (req, 
       // Insert registration
       let result = await db.collection("registerEvents").insertOne(registrationData);
       
+      const user = await db.collection("users").findOne({ student_id: student_id });
+      if (!user) {
+          return res.status(404).json({ message: 'User not found.' });
+      }
+      const event = await db.collection("events").findOne({ _id: new ObjectId(event_id) });
+        if (!event) {
+            return res.status(404).json({ message: 'Event not found.' });
+        }
+
+        // Create qrData in the same structure as the frontend
+      const qrData = JSON.stringify({
+        name: user.english_name, // Assuming user has this field
+        studentid: student_id,
+        email: user.email,
+        gender: user.gender // Assuming user has this field
+    });
+
+    const qrCodePath = path.join(__dirname, 'qrcodes', `${student_id}_${event_id}.png`);
+    fs.mkdirSync(path.dirname(qrCodePath), { recursive: true });
+
+    console.log("Generating QR code...");
+    await QRCode.toFile(qrCodePath, qrData);
+    console.log("QR code generated successfully.");
+
+    // Send email
+    console.log("Sending email...");
+        const emailContent = `
+        You have successfully registered for the event: ${eventName}.
+        Event ID: ${event_id}
+        Event Date: ${new Date(eventDateFrom).toLocaleDateString()}
+        Venue: ${event.eventVenue} 
+        Time: ${event.eventTimeStart} - ${event.eventTimeEnd} 
+        Payment Method: ${paymentMethod}
+
+        See you soon!
+    `;
+
+
+      // Step 2: Send the registration confirmation email
+      const email = user.email; 
+
+      await transport.sendMail({
+        from: {
+          name: 'f1233411',
+          address: 'f1233411@comp.hkbu.edu.hk',
+        },
+        to: email,
+        subject: 'Event Registration',
+        text: emailContent,
+        attachments: [
+          {
+              filename: path.basename(qrCodePath),
+              path: qrCodePath,
+              cid: 'qrcode' // Optional: to reference in HTML content
+          }
+      ]
+      });
 
       res.status(201).json({ 
           id: result.insertedId,
           message: 'Registration successful'
       });
       
+
   } catch (err) {
       console.error('Error in registration:', err);
       res.status(400).json({ 
@@ -1711,6 +1780,7 @@ router.put('/api/member/detail/:id', async (req, res) => {
       const english_name = req.body.english_name || existingRecord.english_name;
       const student_id = req.body.student_id || existingRecord.student_id;
       const email = req.body.email || existingRecord.email;
+      const phoneNo = req.body.phoneNo || existingRecord.phoneNo;
       const password = req.body.password || existingRecord.password;
       const access = req.body.access
       const gender = req.body.gender || existingRecord.gender;
@@ -1721,6 +1791,7 @@ router.put('/api/member/detail/:id', async (req, res) => {
           english_name,
           student_id,
           email,
+          phoneNo,
           password,
           access,
           gender,
@@ -1796,6 +1867,7 @@ router.put('/api/user/detail/:id', upload.single('icon'), async (req, res) => {
       const english_name = req.body.english_name || existingRecord.english_name;
       const student_id = req.body.student_id || existingRecord.student_id;
       const email = req.body.email || existingRecord.email;
+      const phoneNo = req.body.phoneNo || existingRecord.phoneNo;
       const password = req.body.password || existingRecord.password;
       const gender = req.body.gender || existingRecord.gender;
       const modifiedAt = new Date(); // Update modifiedAt to current date
@@ -1805,6 +1877,7 @@ router.put('/api/user/detail/:id', upload.single('icon'), async (req, res) => {
           english_name,
           student_id,
           email,
+          phoneNo,
           password,
           gender,
           modifiedAt,
@@ -2079,6 +2152,289 @@ router.get('/api/notifications', async (req, res) => {
   }
 });
 
+router.post('/api/chat', async (req, res) => {
+  const { message, financeData } = req.body;
+  console.log('Sending message to AI:', message); // Log the message
+
+  // Validate input
+  if (!message) {
+    return res.status(400).json({ error: 'Message is required' });
+  }
+
+  // Define the request to the HKBU Llama API
+  const url = 'https://genai.hkbu.edu.hk/general/rest/deployments/llama3_1/llama/completion?api-version=20240723';
+  const requestBody = {
+    max_tokens: 50,
+    messages: [
+      {
+        role: 'user',
+        content: message +  `Income: ${JSON.stringify(financeData.income)}, Expenditure: ${JSON.stringify(financeData.expenditure)}`,
+      },
+  
+    ],
+    stream: false,
+    system: 'You are a helpful assistant.',
+  };
+
+  console.log('Request Body:', JSON.stringify(requestBody, null, 2)); // Log request body
+
+
+
+  try {
+    const response = await axios.post(url, requestBody, {
+      headers: {
+        'api-key': 'f2f394a2-4e7e-4c24-a3be-927c8dac5fcf', // Use environment variable for API key
+        'Content-Type': 'application/json',
+      },
+    });
+
+    console.log('AI response:', response.data);
+
+  
+
+    const aiReply = response.data.choices && response.data.choices.length > 0
+        ? response.data.choices[0].message.content // Correctly access the message content
+        : 'No valid response from AI';
+    res.json({ reply: aiReply });
+  } catch (error) {
+    if (error.response) {
+      // The request was made and the server responded with a status code
+      console.error('Error data:', error.response.data);
+      console.error('Error status:', error.response.status);
+      console.error('Error headers:', error.response.headers);
+      res.status(error.response.status).json({ error: error.response.data });
+  } else if (error.request) {
+      // The request was made but no response was received
+      console.error('No response received:', error.request);
+      res.status(500).json({ error: 'No response from chatbot API' });
+  } else {
+      // Something happened in setting up the request that triggered an Error
+      console.error('Error message:', error.message);
+      res.status(500).json({ error: 'Failed to communicate with chatbot API' });
+  }  }
+});
+
+router.post('/api/inventory', async (req, res) => {
+  const db = await connectToDB();
+  try {
+    const { 
+      name,
+      description, 
+      category,
+      quantity, 
+      purchaseDate, 
+      purchasePrice, 
+      currentValue,
+      location,
+      condition,
+      remarks 
+    } = req.body;
+
+    // Create the inventory record object
+    const inventoryRecord = {
+      name,
+      description,
+      category,
+      quantity: parseInt(quantity, 10), // Ensure quantity is an integer
+      purchaseDate: new Date(purchaseDate), // Ensure date is in the correct format
+      purchasePrice: parseFloat(purchasePrice), // Ensure purchase price is a number
+      currentValue: parseFloat(currentValue), // Ensure current value is a number
+      location,
+      condition,
+      remarks,
+      createdAt: new Date(),
+      modifiedAt: new Date()
+    };
+
+    // Insert the record into the database
+    let result = await db.collection("inventory").insertOne(inventoryRecord);
+    res.status(201).json({ message: 'Inventory item saved successfully', id: result.insertedId });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  } finally {
+    await db.client.close();
+  }
+});
+
+router.put('/api/inventory/:id', async (req, res) => {
+  const db = await connectToDB();
+  const { id } = req.params; // Get the ID from the URL parameters
+  try {
+    const {
+      name,
+      description,
+      category,
+      quantity,
+      purchaseDate,
+      purchasePrice,
+      currentValue,
+      location,
+      condition,
+      remarks
+    } = req.body;
+
+    // Create the updated inventory record object
+    const updatedInventoryRecord = {
+      name,
+      description,
+      category,
+      quantity: parseInt(quantity, 10), // Ensure quantity is an integer
+      purchaseDate: new Date(purchaseDate), // Ensure date is in the correct format
+      purchasePrice: parseFloat(purchasePrice), // Ensure purchase price is a number
+      currentValue: parseFloat(currentValue), // Ensure current value is a number
+      location,
+      condition,
+      remarks,
+      modifiedAt: new Date() // Update modified date
+    };
+
+    // Update the record in the database
+    const result = await db.collection("inventory").updateOne(
+      { _id: new ObjectId(id) }, // Filter by ID
+      { $set: updatedInventoryRecord } // Update the fields
+    );
+
+    if (result.matchedCount === 0) {
+      return res.status(404).json({ message: 'Inventory item not found' });
+    }
+
+    res.status(200).json({ message: 'Inventory item updated successfully' });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  } finally {
+    await db.client.close();
+  }
+});
+
+// DELETE - Delete an inventory item
+router.delete('/api/inventory/:id', async (req, res) => {
+  const db = await connectToDB();
+  const { id } = req.params; // Get the ID from the URL parameters
+  try {
+    // Delete the record from the database
+    const result = await db.collection("inventory").deleteOne({ _id: new ObjectId(id) });
+
+    if (result.deletedCount === 0) {
+      return res.status(404).json({ message: 'Inventory item not found' });
+    }
+
+    res.status(200).json({ message: 'Inventory item deleted successfully' });
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  } finally {
+    await db.client.close();
+  }
+});
+
+router.get('/api/inventory', async function (req, res) {
+  const db = await connectToDB();
+  try {
+      // Perform database query to find all income records
+      const incomeRecords = await db.collection('inventory').find().toArray();
+
+      // Respond with the found income records
+      res.json(incomeRecords);
+  } catch (error) {
+      console.error('Error fetching inventory records:', error);
+      res.status(500).json({ error: 'Internal server error' });
+  }
+});
+router.get('/api/inventory/detail/:id', async function (req, res) {
+  const db = await connectToDB();
+  try {
+    const eventId = req.params.id;
+    const eventdata = await db.collection("inventory").findOne({ _id: new ObjectId(eventId) });
+
+
+
+    res.status(200).json(eventdata);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  } finally {
+    await db.client.close();
+  }
+});
+
+
+router.put('/api/registerEvents/:id', async function (req, res) {
+  const recordId = req.params.id;
+  const { confirm } = req.body;
+
+  if (!recordId) {
+    return res.status(400).json({ message: 'Record ID is required' });
+  }
+
+  if (confirm === undefined) {
+    return res.status(400).json({ message: 'Confirm value is required' });
+  }
+
+  const db = await connectToDB();
+
+  try {
+    // Check if the record exists before updating
+    const existingRecord = await db.collection("registerEvents").findOne({ _id: new ObjectId(recordId) });
+    if (!existingRecord) {
+      return res.status(404).json({ message: 'No registration found for this ID' });
+    }
+
+    const result = await db.collection("registerEvents").updateOne(
+      { _id: new ObjectId(recordId) },
+      { $set: { confirm: confirm } }
+    );
+
+    console.log('Update Result:', result); // Log the result of the update
+
+    if (result.modifiedCount === 0) {
+      return res.status(404).json({ message: 'No registration found for this ID' });
+    }
+
+    res.status(200).json({ message: 'Registration status updated successfully' });
+  } catch (error) {
+    console.error('Error updating registration status:', error);
+    res.status(500).json({ message: 'Internal server error' });
+  } finally {
+    await db.client.close();
+  }
+});
+
+router.put('/api/reset-password/:id', async (req, res) => {
+  const db = await connectToDB();
+  const recordId = req.params.id; // Get the record ID from the URL parameters
+
+  try {
+      // Find the existing record by student_id
+      const existingRecord = await db.collection("users").findOne({ _id: new ObjectId(recordId) });
+      
+      if (!existingRecord) {
+          return res.status(404).json({ message: 'Record not found' });
+      }
+      
+      console.log('Record ID:', recordId);
+      console.log('Existing Record:', existingRecord);
+
+      const password = req.body.password;
+
+      // Ensure the password is provided
+      if (!password) {
+          return res.status(400).json({ message: 'Password is required' });
+      }
+console.log(password);
+      // Prepare the updated record data
+      const updatedRecordData = {
+          password, // You may want to hash the password before saving it
+      };
+
+      // Update the record in the database
+      await db.collection("users").updateOne({ _id: new ObjectId(recordId) }, { $set: updatedRecordData });
+
+      res.status(200).json({ message: 'Record updated successfully' });
+  } catch (err) {
+      console.error('Error updating record:', err);
+      res.status(500).json({ message: 'Internal server error' }); // Use 500 for server errors
+  } finally {
+      await db.client.close();
+  }
+});
 
 
 module.exports = router;
