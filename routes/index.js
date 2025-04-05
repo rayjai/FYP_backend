@@ -41,12 +41,13 @@ router.post('/api/register', async (req, res) => {
     const email = req.body.email;
     const password = req.body.password;
     const phoneNo = req.body.phoneNo;
+    const username = req.body.username;
     const gender = req.body.gender;
     const role = req.body.role;
     const icon = req.body.icon;
 
     // Check if the registration data is valid
-    if (!english_name || !student_id || !email || !password || !gender || !phoneNo) {
+    if (!english_name || !student_id || !email || !password || !gender || !phoneNo || !username) {
       return res.status(400).send('Bad Request');
     }
 
@@ -64,6 +65,7 @@ router.post('/api/register', async (req, res) => {
       password: password,
       phoneNo: phoneNo,
       gender: gender,
+      username: username,
       createdAt: new Date(),
       modifiedAt: new Date(),
       role: role,
@@ -618,6 +620,58 @@ router.post('/api/eventregister', upload.single('fpsPaymentPhoto'), async (req, 
       await db.client.close();
   }
 });
+
+router.get('/api/registrations/detail/:id', async function (req, res) {
+  const db = await connectToDB();
+  try {
+    const registrationId = req.params.id;
+    
+    // Validate ID format
+    if (!ObjectId.isValid(registrationId)) {
+      return res.status(400).json({ message: 'Invalid registration ID format' });
+    }
+
+    const registration = await db.collection("registerEvents").findOne({ 
+      _id: new ObjectId(registrationId) 
+    });
+
+    if (!registration) {
+      return res.status(404).json({ message: 'Registration not found' });
+    }
+
+    // Get additional user details
+    const user = await db.collection("users").findOne({ 
+      student_id: registration.student_id 
+    });
+    
+
+    // Get event details
+    const event = await db.collection("events").findOne({ 
+      _id: new ObjectId(registration.event_id) 
+    });
+
+    // Combine all data
+    const responseData = {
+      ...registration,
+      user: {
+        english_name: user.english_name,
+        email: user.email
+      },
+      event: {
+        name: event.eventName,
+        date: event.eventDateFrom
+      }
+    };
+
+    res.status(200).json(responseData);
+  } catch (err) {
+    console.error('Error fetching registration details:', err);
+    res.status(500).json({ message: 'Internal server error' });
+  } finally {
+    await db.client.close();
+  }
+});
+
 // Assuming you're using Express.js
 router.delete('/api/registrations/:student_id/:event_id', async (req, res) => {
   const db = await connectToDB();
@@ -754,9 +808,12 @@ router.put('/api/editclubhome/:id', upload.fields([{ name: 'eventPoster1' }, { n
 
       // Get the other form data
       const description = req.body.description || existingClub.description;
+      const tagLine = req.body.tagLine || existingClub.tagLine;
+
 
       // Prepare the updated club data
       const updatedClubData = {
+          tagLine,
           description,
           modifiedAt: new Date(),
       };
@@ -920,27 +977,74 @@ router.get('/api/admins', async function (req, res) {
 
 
 router.put('/api/attendance/:eventId/:studentId', async (req, res) => {
-  const { eventId, studentId } = req.params; // Get eventId and studentId from the URL parameters
-  const { attendance } = req.body; // Get attendance status from the request body
-
+  const { eventId, studentId } = req.params;
   const db = await connectToDB();
+  
   try {
-      // Update the attendance status for the student in the context of the event
-      const result = await db.collection('registerEvents').updateOne(
-          { event_id: eventId, student_id: studentId }, // Filter by event_id and student_id
-          { $set: { attendance: true } } // Update the attendance field
-      );
+    // Check if student is registered for the event
+    const registration = await db.collection('registerEvents').findOne({
+      event_id: eventId,
+      student_id: studentId
+    });
 
-      if (result.modifiedCount === 1) {
-          res.status(200).json({ message: 'Attendance updated successfully.' });
-      } else {
-          res.status(404).json({ message: 'Attendance record not found or already confirmed.' });
-      }
+    if (!registration) {
+      return res.status(404).json({ 
+        success: false,
+        message: 'Student is not registered for this event',
+        code: 'NOT_REGISTERED'
+      });
+    }
+
+    // If attendance already confirmed
+    if (registration.attendance === true) {
+      return res.status(208).json({ // 208 Already Reported
+        success: true,
+        message: 'Attendance was already confirmed',
+        code: 'ALREADY_CONFIRMED',
+        studentInfo: {
+          name: registration.name,
+          studentId: registration.student_id,
+          email: registration.email
+        }
+      });
+    }
+
+    // Update attendance
+    const result = await db.collection('registerEvents').updateOne(
+      { event_id: eventId, student_id: studentId },
+      { $set: { 
+        attendance: true,
+        attended_at: new Date()
+      }}
+    );
+
+    if (result.modifiedCount === 1) {
+      res.status(200).json({ 
+        success: true,
+        message: 'Attendance confirmed successfully',
+        code: 'CONFIRMED',
+        studentInfo: {
+          name: registration.name,
+          studentId: registration.student_id,
+          email: registration.email
+        }
+      });
+    } else {
+      res.status(500).json({ 
+        success: false,
+        message: 'Failed to update attendance',
+        code: 'UPDATE_FAILED'
+      });
+    }
   } catch (err) {
-      console.error('Error updating attendance:', err);
-      res.status(500).json({ message: 'Internal server error' });
+    console.error('Error updating attendance:', err);
+    res.status(500).json({ 
+      success: false,
+      message: 'Internal server error',
+      code: 'SERVER_ERROR'
+    });
   } finally {
-      await db.client.close();
+    await db.client.close();
   }
 });
 
@@ -1782,6 +1886,7 @@ router.put('/api/member/detail/:id', async (req, res) => {
       const email = req.body.email || existingRecord.email;
       const phoneNo = req.body.phoneNo || existingRecord.phoneNo;
       const password = req.body.password || existingRecord.password;
+      const username = req.body.username || existingRecord.username;
       const access = req.body.access
       const gender = req.body.gender || existingRecord.gender;
       const modifiedAt = new Date(); // Update modifiedAt to current date
@@ -1793,6 +1898,7 @@ router.put('/api/member/detail/:id', async (req, res) => {
           email,
           phoneNo,
           password,
+          username,
           access,
           gender,
           modifiedAt,
@@ -1868,6 +1974,7 @@ router.put('/api/user/detail/:id', upload.single('icon'), async (req, res) => {
       const student_id = req.body.student_id || existingRecord.student_id;
       const email = req.body.email || existingRecord.email;
       const phoneNo = req.body.phoneNo || existingRecord.phoneNo;
+      const username = req.body.username || existingRecord.username;
       const password = req.body.password || existingRecord.password;
       const gender = req.body.gender || existingRecord.gender;
       const modifiedAt = new Date(); // Update modifiedAt to current date
@@ -1878,6 +1985,7 @@ router.put('/api/user/detail/:id', upload.single('icon'), async (req, res) => {
           student_id,
           email,
           phoneNo,
+          username,
           password,
           gender,
           modifiedAt,
@@ -1949,6 +2057,29 @@ router.post('/api/reset-password', async (req, res) => {
       res.status(500).json({ message: 'Internal server error.' });
     }
   });
+  router.post('/api/send-verification', async (req, res) => {
+    const db = await connectToDB();
+  
+    const { email,code } = req.body;
+  
+    try {
+      
+        await transport.sendMail({
+          from: {
+            name: 'f1233411',
+            address: 'f1233411@comp.hkbu.edu.hk',
+          },
+          to: email,
+          subject: 'Student Club Verification Code',
+          text: `You verification code is \n${code}`,
+        });
+    
+        res.status(200).json({ message: 'Verification code sent.' });
+      } catch (error) {
+        console.error('Error during password reset:', error);
+        res.status(500).json({ message: 'Internal server error.' });
+      }
+    });
   router.post('/api/finance_category', async (req, res) => {
     const db = await connectToDB();
     try {
@@ -2433,6 +2564,23 @@ console.log(password);
       res.status(500).json({ message: 'Internal server error' }); // Use 500 for server errors
   } finally {
       await db.client.close();
+  }
+});
+
+// Server-side route
+router.post('/api/check-email', async (req, res) => {
+  try {
+    const db = await connectToDB();
+
+      const { email } = req.body;
+      
+      // Check if email exists in your database
+      const user = await db.collection("users").findOne({ email: email });
+
+      res.json({ exists: !!user });
+  } catch (error) {
+      console.error('Error checking email:', error);
+      res.status(500).json({ error: 'Error checking email' });
   }
 });
 
