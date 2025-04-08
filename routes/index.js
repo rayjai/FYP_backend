@@ -56,6 +56,9 @@ router.post('/api/register', async (req, res) => {
     if (user) {
       return res.status(400).send('Email already registered');
     }
+    const createdAt = new Date();
+    const expiry_date = new Date(createdAt);
+    expiry_date.setFullYear(expiry_date.getFullYear() + 1);
 
     // Create a new user
     let userdata = {
@@ -71,6 +74,7 @@ router.post('/api/register', async (req, res) => {
       role: role,
       icon: icon,
       access: true,
+      expiry_date:expiry_date,
     };
     let result = await db.collection("users").insertOne(userdata);
     res.status(201).json({ id: result.insertedId });
@@ -102,7 +106,10 @@ router.post('/api/login', async (req, res) => {
     if (user.access === false) {
       return res.status(403).send('Access denied'); // Forbidden
     }
-
+    const currentDate = new Date();
+    if (user.expiry_date && new Date(user.expiry_date) < currentDate) {
+      return res.status(403).send('Account expired'); // Forbidden
+    }
     // Check if the password is correct
     if (user.password !== password) {
       return res.status(401).send('Unauthorized');
@@ -1879,7 +1886,13 @@ router.put('/api/member/detail/:id', async (req, res) => {
       console.log('Record ID:', recordId);
       console.log('Existing Record:', existingRecord);
 
-    
+      let expiryDate = existingRecord.expiry_date;
+      if (req.body.expiry_date) {
+          // Parse the date string (format: YYYY-MM-DD)
+          const [year, month, day] = req.body.expiry_date.split('-');
+          expiryDate = new Date(Date.UTC(year, month - 1, day));
+        
+      }
       // Get the other form data
       const english_name = req.body.english_name || existingRecord.english_name;
       const student_id = req.body.student_id || existingRecord.student_id;
@@ -1889,6 +1902,7 @@ router.put('/api/member/detail/:id', async (req, res) => {
       const username = req.body.username || existingRecord.username;
       const access = req.body.access
       const gender = req.body.gender || existingRecord.gender;
+      const expiry_date = expiryDate
       const modifiedAt = new Date(); // Update modifiedAt to current date
 
       // Prepare the updated record data
@@ -1901,6 +1915,7 @@ router.put('/api/member/detail/:id', async (req, res) => {
           username,
           access,
           gender,
+          expiry_date,
           modifiedAt,
       };
 
