@@ -1055,6 +1055,53 @@ router.put('/api/attendance/:eventId/:studentId', async (req, res) => {
   }
 });
 
+router.get('/api/registration-status/:eventId/:studentId', async (req, res) => {
+  const { eventId, studentId } = req.params;
+  const db = await connectToDB();
+  
+  try {
+    const registration = await db.collection('registerEvents').findOne({
+      event_id: eventId,
+      student_id: studentId
+    });
+
+    if (!registration) {
+      return res.status(200).json({ 
+        success: false,
+        message: 'Student is not registered for this event',
+        code: 'NOT_REGISTERED',
+        isConfirmed: false,
+        isAttendanceTaken: false,
+        studentInfo: null  // Explicitly set to null
+      });
+    }
+
+    res.status(200).json({
+      success: true,
+      isConfirmed: registration.confirm === true,
+      isAttendanceTaken: registration.attendance === true,
+      studentInfo: {
+        name: registration.name,
+        studentId: registration.student_id,
+        email: registration.email,
+        gender: registration.gender
+      }
+    });
+
+  } catch (err) {
+    console.error('Error checking registration status:', err);
+    res.status(200).json({ 
+      success: false,
+      message: 'Internal server error',
+      code: 'SERVER_ERROR',
+      isConfirmed: false,
+      isAttendanceTaken: false,
+      studentInfo: null
+    });
+  } finally {
+    await db.client.close();
+  }
+});
 
 router.post('/api/createpost', upload.fields([
   { name: 'poster1' },
@@ -1447,28 +1494,7 @@ router.get('/api/posts/comments/count', async (req, res) => {
   }
 });
 
-router.get('/api/registrations/today/count', async (req, res) => {
-  const db = await connectToDB();
-  try {
-      const today = new Date();
-      const startOfDay = new Date(today.setHours(0, 0, 0, 0));
-      const endOfDay = new Date(today.setHours(23, 59, 59, 999));
 
-      const count = await db.collection("registerEvents").countDocuments({
-          createdAt: {
-              $gte: startOfDay,
-              $lt: endOfDay
-          }
-      });
-
-      res.status(200).json({ count }); // Return the count of registrations for today
-  } catch (error) {
-      console.error('Error fetching today\'s registration count:', error);
-      res.status(500).json({ message: 'Internal server error' });
-  } finally {
-      await db.client.close();
-  }
-});
 
 
 router.post('/api/income', async (req, res) => {
@@ -2260,12 +2286,13 @@ router.post('/api/create-checkout-session', async (req, res) => {
 router.post('/api/notifications', async (req, res) => {
   const db = await connectToDB();
   try {
-    const { title, message } = req.body;
+    const { title, message,expiry_date } = req.body;
 
     // Create the notification object
     const notification = {
       title,
       message,
+      expiry_date,
       createdAt: new Date(),
       modifiedAt: new Date()
     };
@@ -2279,15 +2306,18 @@ router.post('/api/notifications', async (req, res) => {
     await db.client.close();
   }
 });
+
 router.get('/api/notifications', async (req, res) => {
   const db = await connectToDB();
   try {
-    // Fetch notifications from the database, sorted by createdAt in descending order
+    const currentDate = new Date(); // Get the current date
+
+    // Fetch notifications from the database where expiry_date is not later than the current date
     const notifications = await db.collection("notifications")
-      .find({})
-      .sort({ createdAt: -1 }) // Sort by createdAt in descending order
-      .limit(8) 
-      .toArray();
+    .find({ expiry_date: { $gt: currentDate.toISOString().split('T')[0] } })      
+    .sort({ createdAt: -1 }) // Sort by createdAt in descending order
+    .limit(8) 
+    .toArray();
 
     // Send the notifications as a response
     res.status(200).json(notifications);
@@ -2297,6 +2327,25 @@ router.get('/api/notifications', async (req, res) => {
     await db.client.close();
   }
 });
+router.delete('/api/notifications/:id', async (req, res) => {
+  const db = await connectToDB();
+  const notificationId = req.params.id;
+
+  try {
+    const result = await db.collection("notifications").deleteOne({ _id: new ObjectId(notificationId) });
+    
+    if (result.deletedCount === 1) {
+      res.status(200).json({ message: 'Notification deleted successfully.' });
+    } else {
+      res.status(404).json({ message: 'Notification not found.' });
+    }
+  } catch (err) {
+    res.status(500).json({ message: err.message });
+  } finally {
+    await db.client.close();
+  }
+});
+
 
 router.post('/api/chat', async (req, res) => {
   const { message, financeData } = req.body;
@@ -2598,6 +2647,18 @@ router.post('/api/check-email', async (req, res) => {
       res.status(500).json({ error: 'Error checking email' });
   }
 });
+router.get('/api/student/:id', async function (req, res) {
+  const db = await connectToDB();
+  try {
+    const eventId = req.params.id;
+    const eventdata = await db.collection("users").findOne({ student_id: eventId });
 
+    res.status(200).json(eventdata);
+  } catch (err) {
+    res.status(400).json({ message: err.message });
+  } finally {
+    await db.client.close();
+  }
+});
 
 module.exports = router;
